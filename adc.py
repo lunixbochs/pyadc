@@ -1,4 +1,5 @@
 import socket
+from ConfigParser import SafeConfigParser
 
 class Connection:
 	def __init__(self, host, port):
@@ -31,9 +32,14 @@ class Share: # will be responsible for keeping a list of Files
 	pass
 
 class Client:
-	def __init__(self, host, port):
+	def __init__(self, configFile):
+		self.config = config = SafeConfigParser()
+		config.read(configFile)
+		host = config.get('server', 'host')
+		port = config.getint('server', 'port')
+
 		self.conn = Connection(host, port)
-		self.sid = None
+		self.info = {}
 
 	def run(self):
 		self.conn.connect()
@@ -44,26 +50,53 @@ class Client:
 	def parse(self, msg):
 		if not msg: return
 		byte, msg = msg[0], msg[1:]
+
+		args = None
+		if ' ' in msg:
+			msg, args = msg.split(' ', 1)
+
 		if byte == 'I':
-			self.handleInfo(msg)
+			self.handleInfo(msg, args)
 		elif byte == 'F':
-			self.handleFeature(msg)
+			self.handleFeature(msg, args)
 		else:
 			print 'unhandled message:'
 			print '->', byte, '=>', msg
 	
-	def handleInfo(self, msg):
-		print 'Info:', msg
+	def handleInfo(self, msg, args=None):
+		argv = args.split(' ')
+		argc = len(argv)
 
-	def handleFeature(self, msg):
-		print 'Feature:', msg
+		print 'Info:', msg, args
+		if msg == 'SID' and argc >= 1:
+			self.sid = argv[0]
+		if msg == 'INF' and argc >= 1:
+			for arg in argv:
+				field, info = arg[:2], arg[2:]
+				self.info[field] = info.replace('\\s', ' ')
+			
+			print self.info
 
-	def handleClient(self, msg):
-		print 'Client:', msg
+	def handleFeature(self, msg, args=None):
+		print 'Feature:', msg, args
+
+	def handleClient(self, msg, args=None):
+		print 'Client:', msg, args
 
 if __name__ == '__main__':
-	host = ''
-	port = 0
-	
-	adc = Client(host, port)
+	import sys, os
+
+	config = None
+	if len(sys.argv) >= 2:
+		config = sys.argv[1]
+
+	if not (config and os.path.isfile(config)):
+		if os.path.isfile('adc.conf'):
+			config = 'adc.conf'
+		else:
+			print './adc.conf does not exist and no other config specified'
+			print 'Usage: %s [path/to/config]' % sys.argv[0]
+			sys.exit(1)
+
+	adc = Client(config)
 	adc.run()
