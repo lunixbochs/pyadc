@@ -1,5 +1,10 @@
 import socket
+import base64
+import binascii
+import uuid
 from ConfigParser import SafeConfigParser
+
+import tiger # http://github.com/lunixbochs/pytiger
 
 class Connection:
 	def __init__(self, host, port):
@@ -37,9 +42,15 @@ class Client:
 		config.read(configFile)
 		host = config.get('server', 'host')
 		port = config.getint('server', 'port')
+		self.uuid = uuid.uuid1().hex
+		self.cid = base64.b32encode(tiger.treehash(self.uuid))
+		print self.cid, type(self.cid)
 
 		self.conn = Connection(host, port)
+		self.clients = {}
 		self.info = {}
+
+		self.logged_in = False
 
 	def run(self):
 		self.conn.connect()
@@ -73,9 +84,12 @@ class Client:
 		if msg == 'INF' and argc >= 1:
 			for arg in argv:
 				field, info = arg[:2], arg[2:]
-				self.info[field] = info.replace('\\s', ' ')
+				self.info[field] = info.replace('\s', ' ')
 			
 			print self.info
+
+			if self.logged_in == False:
+				self.conn.send('BINF%s ID%s PD%s' % (self.sid, base64.b32encode(binascii.unhexlify(tiger.hash(self.uuid))), base64.b32encode(self.cid)))
 
 	def handleFeature(self, msg, args=None):
 		print 'Feature:', msg, args
