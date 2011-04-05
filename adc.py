@@ -18,7 +18,8 @@ class Connection:
 		s.connect((self.host, self.port))
 	
 	def send(self, msg):
-		self.sock.send(msg+'\n')
+		print '>> %s' % msg
+		self.sock.send(msg+chr(0x0a))
 	
 	def recv(self):
 		if not self.queue:
@@ -36,15 +37,17 @@ class File: # will hash a file and store full path and metadata
 class Share: # will be responsible for keeping a list of Files
 	pass
 
+def b32fromhex(hexstr, length=39):
+	return base64.b32encode(binascii.unhexlify(hexstr))[:length]
+
 class Client:
 	def __init__(self, configFile):
 		self.config = config = SafeConfigParser()
 		config.read(configFile)
 		host = config.get('server', 'host')
 		port = config.getint('server', 'port')
-		self.uuid = uuid.uuid1().hex
-		self.cid = base64.b32encode(tiger.treehash(self.uuid))
-		print self.cid, type(self.cid)
+		self.pid = tiger.hash(uuid.uuid1().hex)
+		self.cid = tiger.hash(self.pid)
 
 		self.conn = Connection(host, port)
 		self.clients = {}
@@ -71,17 +74,17 @@ class Client:
 		elif byte == 'F':
 			self.handleFeature(msg, args)
 		else:
-			print 'unhandled message:'
-			print '->', byte, '=>', msg
+			print '<< unhandled message:'
+			print '<< ->', byte, '=>', msg
 	
 	def handleInfo(self, msg, args=None):
 		argv = args.split(' ')
 		argc = len(argv)
 
-		print 'Info:', msg, args
+		print '<< Info:', msg, args
 		if msg == 'SID' and argc >= 1:
 			self.sid = argv[0]
-		if msg == 'INF' and argc >= 1:
+		elif msg == 'INF' and argc >= 1:
 			for arg in argv:
 				field, info = arg[:2], arg[2:]
 				self.info[field] = info.replace('\s', ' ')
@@ -89,13 +92,13 @@ class Client:
 			print self.info
 
 			if self.logged_in == False:
-				self.conn.send('BINF%s ID%s PD%s' % (self.sid, base64.b32encode(binascii.unhexlify(tiger.hash(self.uuid))), base64.b32encode(self.cid)))
+				self.conn.send('BINF %s ID%s PD%s' % (self.sid, b32fromhex(self.cid), b32fromhex(self.pid)))
 
 	def handleFeature(self, msg, args=None):
-		print 'Feature:', msg, args
+		print '<< Feature:', msg, args
 
 	def handleClient(self, msg, args=None):
-		print 'Client:', msg, args
+		print '<< Client:', msg, args
 
 if __name__ == '__main__':
 	import sys, os
