@@ -7,6 +7,23 @@ from ConfigParser import SafeConfigParser
 
 import tiger # http://github.com/lunixbochs/pytiger
 
+import bz2
+files_xml = '''
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<FileListing Version="1" CID="mycid" Generator="DC++ 0.701" Base="/">
+  <Directory Name="share">
+    <Directory Name="DC++ Prerelease">
+      <File Name="DCPlusPlus.pdb" Size="17648640" TTH="xxx" />
+      <File Name="DCPlusPlus.exe" Size="946176" TTH="yyy" />
+    </Directory>
+    <File Name="ADC.txt" Size="154112" TTH="zzz" />
+  </Directory>
+  <!-- Only used by partial lists -->
+  <Directory Name="share2" Incomplete="1"/>
+</FileListing>
+'''
+files_xml_bz2 = bz2.compress(files_xml)
+
 def print_r(obj, tabs=0, newline=True):
 	if type(obj) in (list, tuple, set, frozenset):
 		for entry in obj:
@@ -33,6 +50,10 @@ class Connection:
 	def send(self, msg):
 		print '>> %s' % msg
 		self.sock.send(msg+chr(0x0a))
+	
+	def send_data(self, data):
+		print '>> Sending DATA of length %i' % len(data)
+		self.sock.send(data)
 	
 	def recv(self):
 		if not self.queue:
@@ -102,7 +123,11 @@ class DirectClient(ADClient):
 		elif msg == 'INF' and argc == 1:
 			self.cid = args[0]
 			self.conn.send('CINF ID%s TO%s' % (self.parent.cid, self.token))
-		
+		elif msg == 'GET' and argc == 4:
+			fileType, identifier, start_pos, bytes = args
+			if fileType == 'file' and identifier == 'files.xml.bz2':
+				self.conn.send('CSND file files.xml.bz2 0 %i' % len(files_xml_bz2))
+				self.conn.send_data(files_xml_bz2)
 
 class HubClient(ADClient):
 	def __init__(self, configFile):
@@ -166,6 +191,18 @@ class HubClient(ADClient):
 			for arg in args[1:]:
 				field, info = arg[:2], arg[2:]
 				self.clients[sid][field] = info.replace('\s', ' ')
+		elif msg == 'MSG' and argc >= 2:
+			sid = args[0]
+			name = sid
+			msg = args[1].replace('\s', ' ')
+
+			if sid in self.clients:
+				if 'NI' in self.clients[sid]:
+					name = self.clients[sid]['NI']
+				elif 'I4' in self.clients[sid]:
+					name = self.clients[sid]['I4']
+			
+			print '<< <%s> %s' % (name, msg)
 		
 		# print_r(self.clients)
 
