@@ -1,5 +1,5 @@
 import socket
-import base64
+import base32
 import binascii
 import uuid
 from ConfigParser import SafeConfigParser
@@ -37,8 +37,8 @@ class File: # will hash a file and store full path and metadata
 class Share: # will be responsible for keeping a list of Files
 	pass
 
-def b32fromhex(hexstr, length=39):
-	return base64.b32encode(binascii.unhexlify(hexstr))[:length]
+def b32fromhex(hexstr):
+	return base32.encode(binascii.unhexlify(hexstr))
 
 class Client:
 	def __init__(self, configFile):
@@ -47,7 +47,7 @@ class Client:
 		host = config.get('server', 'host')
 		port = config.getint('server', 'port')
 		self.pid = tiger.hash(uuid.uuid1().hex)
-		self.cid = tiger.hash(self.pid)
+		self.cid = tiger.hash(binascii.unhexlify(self.pid))
 
 		self.conn = Connection(host, port)
 		self.clients = {}
@@ -75,7 +75,7 @@ class Client:
 			self.handleFeature(msg, args)
 		else:
 			print '<< unhandled message:'
-			print '<< ->', byte, '=>', msg
+			print '<<', (byte, msg, args)
 	
 	def handleInfo(self, msg, args=None):
 		argv = args.split(' ')
