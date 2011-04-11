@@ -1,4 +1,6 @@
 import socket
+import thread
+
 import base32
 import uuid
 from ConfigParser import SafeConfigParser
@@ -48,7 +50,61 @@ class File: # will hash a file and store full path and metadata
 class Share: # will be responsible for keeping a list of Files
 	pass
 
-class Client:
+class ADClient:
+	handleMap = {}
+
+	def parse(self, msg):
+		if not msg: return
+		byte, msg = msg[0], msg[1:]
+
+		args = None
+		argc = 0
+		if ' ' in msg:
+			msg, args = msg.split(' ', 1)
+			if ' ' in args:
+				args = args.split(' ')
+				argc = len(args)
+			else:
+				args = (args,)
+				argc = 1
+
+		if byte in self.handleMap:
+			self.handleMap[byte](msg, args, argc)
+		else:
+			print '<< unhandled message:'
+			print '<<', (byte, msg, args)	
+
+class DirectClient(ADClient):
+	def __init__(self, parent, sid, token, host, port):
+		self.parent = parent
+		self.sid = sid
+		self.token = token
+		self.conn = Connection(host, port)
+
+		self.cid = None
+		self.info = {}
+
+		self.handleMap = {
+			'C':self.handleClient
+		}
+		thread.start_new_thread(self.run, ())
+		
+	def run(self):
+		self.conn.connect()
+		self.conn.send('CSUP ADBASE ADTIGR ')
+		while True:
+			self.parse(self.conn.recv())
+	
+	def handleClient(self, msg, args, argc):
+		print '<< Client:', msg, args
+		if msg == 'SUP' and argc >= 1:
+			self.info['SUP'] = args
+		elif msg == 'INF' and argc == 1:
+			self.cid = args[0]
+			self.conn.send('CINF ID%s TO%s' % (self.parent.cid, self.token))
+		
+
+class HubClient(ADClient):
 	def __init__(self, configFile):
 		self.config = config = SafeConfigParser()
 		config.read(configFile)
@@ -80,7 +136,16 @@ class Client:
 		self.clients = {}
 		self.info = {}
 
+		self.connections = []
+
 		self.logged_in = False
+
+		self.handleMap = {
+			'B':self.handleBroadcast,
+			'I':self.handleInfo,
+			'F':self.handleFeature,
+			'D':self.handleDirect,
+		}
 
 	def run(self):
 		self.conn.connect()
@@ -88,38 +153,10 @@ class Client:
 		while True:
 			self.parse(self.conn.recv())
 	
-	def parse(self, msg):
-		if not msg: return
-		byte, msg = msg[0], msg[1:]
-
-		args = None
-		argc = 0
-		if ' ' in msg:
-			msg, args = msg.split(' ', 1)
-			if ' ' in args:
-				args = args.split(' ')
-				argc = len(args)
-			else:
-				args = (args,)
-				argc = 1
-
-		handleMap = {
-			'B':self.handleBroadcast,
-			'I':self.handleInfo,
-			'F':self.handleFeature,
-			'D':self.handleDirect,
-		}
-
-		if byte in handleMap:
-			handleMap[byte](msg, args, argc)
-		else:
-			print '<< unhandled message:'
-			print '<<', (byte, msg, args)
-	
 	def sendInfo(self):
 		inf = ' '.join('%s%s' % (field, str(self.inf[field]).replace(' ', '\s')) for field in self.inf)
 		self.conn.send('BINF %s %s' % (self.sid, inf))
-	
+
 	def handleBroadcast(self, msg, args, argc):
 		print '<< Broadcast:', msg, args
 		if msg == 'INF' and argc >= 2:
@@ -155,7 +192,9 @@ class Client:
 			if protocol != 'ADC/1.0': return
 			if not sid in self.clients: return
 			if not 'I4' in self.clients[sid]: return
+			if not port.isdigit(): return
 
+			port = int(port)
 			ip = self.clients[sid]['I4']
 			if 'NI' in self.clients[sid]:
 				nick = self.clients[sid]['NI']
@@ -163,6 +202,9 @@ class Client:
 				nick = '<%s>' % ip
 
 			print 'Connection requested from: %s (%s:%s)' % (nick, ip, port)
+
+			connection = DirectClient(self, sid, token, ip, port)
+			self.connections.append(connection)
 
 if __name__ == '__main__':
 	import sys, os
@@ -179,5 +221,5 @@ if __name__ == '__main__':
 			print 'Usage: %s [path/to/config]' % sys.argv[0]
 			sys.exit(1)
 
-	adc = Client(config)
+	adc = HubClient(config)
 	adc.run()
