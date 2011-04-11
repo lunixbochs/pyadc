@@ -1,7 +1,6 @@
 import socket
 import base32
 import uuid
-from binascii import unhexlify
 from ConfigParser import SafeConfigParser
 
 import tiger # http://github.com/lunixbochs/pytiger
@@ -12,7 +11,7 @@ def print_r(obj, tabs=0, newline=True):
 			print_r(entry, tabs+1)
 	
 	elif type(obj) == dict:
-		for entry in obj:
+		for entry in sorted(obj):
 			print '%s%s:' % ('\t'*tabs, entry),
 			print_r(obj[entry], tabs+1, False)
 	else:
@@ -56,9 +55,9 @@ class Client:
 		host = config.get('server', 'host')
 		port = config.getint('server', 'port')
 
-		pid = unhexlify(tiger.hash(uuid.uuid1().hex).replace('00', '01'))
+		pid = tiger.hash(uuid.uuid1().hex).replace('00', '01')
 		self.pid = base32.encode(pid)
-		self.cid = base32.encode(unhexlify(tiger.hash(pid)))
+		self.cid = base32.encode(tiger.hash(pid))
 		self.inf = {
 			'ID': self.cid,
 			'PD': self.pid,
@@ -67,9 +66,14 @@ class Client:
 			'NI': 'daemon', # nickname
 			'VE': 'pyadc 0.1', # client version
 			'US': 0, # maximum upload speed, bytes/second
-			'DS': 0, # maximum download speed, bytes/second
+			# 'DS': 0, # maximum download speed, bytes/second
 			'FS': 0, # number of free upload slots
-			'HR': 0, # number of hubs where user is registered
+			'SL': 0, # maximum number of open slots
+			'HN': 0, # number of hubs where user is normal
+			'HR': 0, # number of hubs where user is registered and normal
+			'HO': 0, # number of hubs where user is op and normal
+			'SU': 'ADC0,TCP4', # list of capabilities
+			'U4': 0, # udp ipv4 port
 		}
 
 		self.conn = Connection(host, port)
