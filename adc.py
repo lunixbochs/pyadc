@@ -1,10 +1,22 @@
 import socket
 import base32
-import binascii
 import uuid
+from binascii import unhexlify
 from ConfigParser import SafeConfigParser
 
 import tiger # http://github.com/lunixbochs/pytiger
+
+def print_r(obj, tabs=0, newline=True):
+	if type(obj) in (list, tuple, set, frozenset):
+		for entry in obj:
+			print_r(entry, tabs+1)
+	
+	elif type(obj) == dict:
+		for entry in obj:
+			print '%s%s:' % ('\t'*tabs, entry),
+			print_r(obj[entry], tabs+1, False)
+	else:
+		print '%s%s' % (newline and '\t'*tabs or '', obj)
 
 class Connection:
 	def __init__(self, host, port):
@@ -37,17 +49,28 @@ class File: # will hash a file and store full path and metadata
 class Share: # will be responsible for keeping a list of Files
 	pass
 
-def b32fromhex(hexstr):
-	return base32.encode(binascii.unhexlify(hexstr))
-
 class Client:
 	def __init__(self, configFile):
 		self.config = config = SafeConfigParser()
 		config.read(configFile)
 		host = config.get('server', 'host')
 		port = config.getint('server', 'port')
-		self.pid = tiger.hash(uuid.uuid1().hex)
-		self.cid = tiger.hash(binascii.unhexlify(self.pid))
+
+		pid = unhexlify(tiger.hash(uuid.uuid1().hex).replace('00', '01'))
+		self.pid = base32.encode(pid)
+		self.cid = base32.encode(unhexlify(tiger.hash(pid)))
+		self.inf = {
+			'ID': self.cid,
+			'PD': self.pid,
+			'SF': 0, # number of shared files
+			'SS': 1, # size of shared files in bytes
+			'NI': 'daemon', # nickname
+			'VE': 'pyadc 0.1', # client version
+			'US': 0, # maximum upload speed, bytes/second
+			'DS': 0, # maximum download speed, bytes/second
+			'FS': 0, # number of free upload slots
+			'HR': 0, # number of hubs where user is registered
+		}
 
 		self.conn = Connection(host, port)
 		self.clients = {}
@@ -66,38 +89,58 @@ class Client:
 		byte, msg = msg[0], msg[1:]
 
 		args = None
+		argc = 0
 		if ' ' in msg:
 			msg, args = msg.split(' ', 1)
+			if ' ' in args:
+				args = args.split(' ')
+				argc = len(args)
+			else:
+				args = (args,)
+				argc = 1
 
-		if byte == 'I':
-			self.handleInfo(msg, args)
+		if byte == 'B':
+			self.handleBroadcast(msg, args, argc)
+		elif byte == 'I':
+			self.handleInfo(msg, args, argc)
 		elif byte == 'F':
-			self.handleFeature(msg, args)
+			self.handleFeature(msg, args, argc)
 		else:
 			print '<< unhandled message:'
 			print '<<', (byte, msg, args)
 	
-	def handleInfo(self, msg, args=None):
-		argv = args.split(' ')
-		argc = len(argv)
+	def sendInfo(self):
+		inf = ' '.join('%s%s' % (field, str(self.inf[field]).replace(' ', '\s')) for field in self.inf)
+		self.conn.send('BINF %s %s' % (self.sid, inf))
+	
+	def handleBroadcast(self, msg, args, argc):
+		print '<< Broadcast:', msg, args
+		if msg == 'INF' and argc >= 2:
+			sid = args[0]
+			if not sid in self.clients: self.clients[sid] = {}
 
+			for arg in args[1:]:
+				field, info = arg[:2], arg[2:]
+				self.clients[sid][field] = info.replace('\s', ' ')
+		
+		print_r(self.clients)
+
+	def handleInfo(self, msg, args, argc):
 		print '<< Info:', msg, args
 		if msg == 'SID' and argc >= 1:
-			self.sid = argv[0]
+			self.sid = args[0]
 		elif msg == 'INF' and argc >= 1:
-			for arg in argv:
+			for arg in args:
 				field, info = arg[:2], arg[2:]
 				self.info[field] = info.replace('\s', ' ')
-			
-			print self.info
 
 			if self.logged_in == False:
-				self.conn.send('BINF %s ID%s PD%s' % (self.sid, b32fromhex(self.cid), b32fromhex(self.pid)))
+				self.sendInfo()
 
-	def handleFeature(self, msg, args=None):
+	def handleFeature(self, msg, args, argc):
 		print '<< Feature:', msg, args
 
-	def handleClient(self, msg, args=None):
+	def handleClient(self, msg, args, argc):
 		print '<< Client:', msg, args
 
 if __name__ == '__main__':
