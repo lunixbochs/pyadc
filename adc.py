@@ -55,7 +55,7 @@ class Client:
 		host = config.get('server', 'host')
 		port = config.getint('server', 'port')
 
-		pid = tiger.hash(uuid.uuid1().hex).replace('00', '01')
+		pid = tiger.hash(uuid.uuid1().hex).replace('\x00', '\x01')
 		self.pid = base32.encode(pid)
 		self.cid = base32.encode(tiger.hash(pid))
 		self.inf = {
@@ -72,7 +72,7 @@ class Client:
 			'HN': 0, # number of hubs where user is normal
 			'HR': 0, # number of hubs where user is registered and normal
 			'HO': 0, # number of hubs where user is op and normal
-			'SU': 'ADC0,TCP4', # list of capabilities
+			'SU': 'TCP4', # list of capabilities # 'UDP4' is for UDP, 'ADC0' is for ADCS
 			'U4': 0, # udp ipv4 port
 		}
 
@@ -103,12 +103,15 @@ class Client:
 				args = (args,)
 				argc = 1
 
-		if byte == 'B':
-			self.handleBroadcast(msg, args, argc)
-		elif byte == 'I':
-			self.handleInfo(msg, args, argc)
-		elif byte == 'F':
-			self.handleFeature(msg, args, argc)
+		handleMap = {
+			'B':self.handleBroadcast,
+			'I':self.handleInfo,
+			'F':self.handleFeature,
+			'D':self.handleDirect,
+		}
+
+		if byte in handleMap:
+			handleMap[byte](msg, args, argc)
 		else:
 			print '<< unhandled message:'
 			print '<<', (byte, msg, args)
@@ -127,7 +130,7 @@ class Client:
 				field, info = arg[:2], arg[2:]
 				self.clients[sid][field] = info.replace('\s', ' ')
 		
-		print_r(self.clients)
+		# print_r(self.clients)
 
 	def handleInfo(self, msg, args, argc):
 		print '<< Info:', msg, args
@@ -144,8 +147,22 @@ class Client:
 	def handleFeature(self, msg, args, argc):
 		print '<< Feature:', msg, args
 
-	def handleClient(self, msg, args, argc):
-		print '<< Client:', msg, args
+	def handleDirect(self, msg, args, argc):
+		print '<< Direct:', msg, args
+		if msg == 'CTM' and argc == 5:
+			sid, mysid, protocol, port, token = args
+			if mysid != self.sid: return
+			if protocol != 'ADC/1.0': return
+			if not sid in self.clients: return
+			if not 'I4' in self.clients[sid]: return
+
+			ip = self.clients[sid]['I4']
+			if 'NI' in self.clients[sid]:
+				nick = self.clients[sid]['NI']
+			else:
+				nick = '<%s>' % ip
+
+			print 'Connection requested from: %s (%s:%s)' % (nick, ip, port)
 
 if __name__ == '__main__':
 	import sys, os
